@@ -26,6 +26,32 @@ if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
+# Pricing per 1M tokens (input, output) — update as OpenAI changes pricing
+MODEL_PRICING = {
+    "gpt-5.4":      (2.50, 10.00),
+    "gpt-4.1":      (2.00, 8.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1-nano": (0.10, 0.40),
+}
+
+
+def format_cost(usage, model: str) -> str:
+    """Format token usage and estimated cost."""
+    input_tokens = usage.prompt_tokens
+    output_tokens = usage.completion_tokens
+    total_tokens = usage.total_tokens
+
+    pricing = MODEL_PRICING.get(model)
+    if pricing:
+        input_cost = (input_tokens / 1_000_000) * pricing[0]
+        output_cost = (output_tokens / 1_000_000) * pricing[1]
+        total_cost = input_cost + output_cost
+        return (
+            f"Tokens: {input_tokens:,} in / {output_tokens:,} out / {total_tokens:,} total | "
+            f"Cost: ${total_cost:.4f} (${input_cost:.4f} in + ${output_cost:.4f} out)"
+        )
+    return f"Tokens: {input_tokens:,} in / {output_tokens:,} out / {total_tokens:,} total"
+
 
 def get_diff(ref: str, staged: bool = False) -> tuple[str, str]:
     """Get the git diff and a description of what's being reviewed."""
@@ -149,8 +175,8 @@ def load_api_key() -> str:
     return ""
 
 
-def call_gpt(diff: str, commit_info: str, changed_files: str, model: str) -> str:
-    """Send the diff to OpenAI and get the review."""
+def call_gpt(diff: str, commit_info: str, changed_files: str, model: str, stream: bool = True) -> tuple[str, object]:
+    """Send the diff to OpenAI and get the review. Returns (review_text, usage)."""
     from openai import OpenAI
 
     api_key = load_api_key()
@@ -172,17 +198,39 @@ def call_gpt(diff: str, commit_info: str, changed_files: str, model: str) -> str
     )
 
     client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": "You are a precise, experienced code reviewer. Be direct and actionable."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-        max_completion_tokens=4096,
-    )
+    messages = [
+        {"role": "system", "content": "You are a precise, experienced code reviewer. Be direct and actionable."},
+        {"role": "user", "content": prompt},
+    ]
 
-    return response.choices[0].message.content
+    if stream:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.2,
+            max_completion_tokens=4096,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        parts = []
+        usage = None
+        for chunk in response:
+            if chunk.usage:
+                usage = chunk.usage
+            if chunk.choices and chunk.choices[0].delta.content:
+                text = chunk.choices[0].delta.content
+                print(text, end="", flush=True)
+                parts.append(text)
+        print()
+        return "".join(parts), usage
+    else:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.2,
+            max_completion_tokens=4096,
+        )
+        return response.choices[0].message.content, response.usage
 
 
 def save_review(review: str, desc: str, model: str) -> Path:
@@ -205,7 +253,8 @@ def main():
     parser.add_argument("--staged", action="store_true", help="Review staged changes")
     parser.add_argument("--model", default="gpt-5.4", help="OpenAI model (default: gpt-5.4)")
     parser.add_argument("--no-save", action="store_true", help="Don't save review to file")
-    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--no-stream", action="store_true", help="Disable streaming output")
+    parser.add_argument("--json", action="store_true", help="Output as JSON (implies --no-stream)")
     args = parser.parse_args()
 
     # Get the diff
@@ -219,8 +268,11 @@ def main():
 
     print(f"Reviewing {desc} with {args.model}...\n")
 
+    # JSON mode disables streaming
+    use_stream = not args.no_stream and not args.json
+
     # Call GPT
-    review = call_gpt(diff, commit_info, changed_files, args.model)
+    review, usage = call_gpt(diff, commit_info, changed_files, args.model, stream=use_stream)
 
     if args.json:
         output = {
@@ -230,8 +282,13 @@ def main():
             "timestamp": datetime.now().isoformat(),
         }
         print(json.dumps(output, indent=2))
-    else:
+    elif not use_stream:
+        # Only print if we didn't already stream it
         print(review)
+
+    # Show cost
+    if usage:
+        print(f"\n{format_cost(usage, args.model)}")
 
     # Save to file
     if not args.no_save:

@@ -140,17 +140,58 @@ Determine what the user wants and pick the right mode:
 Both scripts share:
 - `--model MODEL` — override model (default: gpt-5.4)
 - `--no-save` — don't save output to `.reviews/`
+- `--no-stream` — disable streaming (wait for full response)
 
 Review-specific:
 - `--staged` — review staged changes
-- `--json` — machine-readable output
+- `--json` — machine-readable output (implies --no-stream)
 - `ref` — git ref or range (default: HEAD)
 
 Consult-specific:
 - `-q`/`--question` — the question to ask
 - `-f`/`--files` — files or directories to include as context
 - `-r`/`--role` — expert (default), architect, reviewer, designer, or implementer
+- `--stdin` — read additional context from stdin (pipe content directly)
 - `--git-context` — include branch and recent commits
+- `--auto-context` — auto-include CLAUDE.md project context
+- `--auto-plan` — auto-detect and include the most recent plan file
+
+## Streaming & Cost Tracking
+
+Both scripts stream responses by default — output appears token-by-token as GPT generates it.
+After each call, token usage and estimated cost are displayed:
+
+```
+Tokens: 2,450 in / 890 out / 3,340 total | Cost: $0.0150 ($0.0061 in + $0.0089 out)
+```
+
+Use `--no-stream` to wait for the full response before printing.
+
+## Piping Content
+
+You can pipe content directly to `gpt_consult.py` without needing files on disk:
+
+```bash
+# Pipe a plan from another command
+cat my-plan.md | python ${CLAUDE_SKILL_DIR}/scripts/gpt_consult.py -q "Review this plan" --stdin -r designer
+
+# Pipe clipboard or any other source
+echo "Should I use Redis or Memcached for session storage?" | python ${CLAUDE_SKILL_DIR}/scripts/gpt_consult.py -q "Advise on this" --stdin -r architect
+```
+
+## Auto-Context
+
+Use `--auto-context` to automatically include CLAUDE.md project context, giving GPT awareness of the project's conventions and structure:
+
+```bash
+python ${CLAUDE_SKILL_DIR}/scripts/gpt_consult.py -q "Review this design" -f design.md -r designer --auto-context
+```
+
+Use `--auto-plan` to automatically find and include the most recent plan file from `docs/superpowers/specs/`, `.claude/plans/`, or `docs/plans/`:
+
+```bash
+python ${CLAUDE_SKILL_DIR}/scripts/gpt_consult.py -q "Is this implementation plan solid?" --auto-plan -r implementer
+```
 
 ## History
 

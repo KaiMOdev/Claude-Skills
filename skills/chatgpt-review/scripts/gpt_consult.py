@@ -25,6 +25,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Pricing per 1M tokens (input, output) — update as OpenAI changes pricing
+MODEL_PRICING = {
+    "gpt-5.4":      (2.50, 10.00),
+    "gpt-4.1":      (2.00, 8.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1-nano": (0.10, 0.40),
+}
+
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
@@ -64,6 +72,24 @@ SYSTEM_PROMPTS = {
 }
 
 
+def format_cost(usage, model: str) -> str:
+    """Format token usage and estimated cost."""
+    input_tokens = usage.prompt_tokens
+    output_tokens = usage.completion_tokens
+    total_tokens = usage.total_tokens
+
+    pricing = MODEL_PRICING.get(model)
+    if pricing:
+        input_cost = (input_tokens / 1_000_000) * pricing[0]
+        output_cost = (output_tokens / 1_000_000) * pricing[1]
+        total_cost = input_cost + output_cost
+        return (
+            f"Tokens: {input_tokens:,} in / {output_tokens:,} out / {total_tokens:,} total | "
+            f"Cost: ${total_cost:.4f} (${input_cost:.4f} in + ${output_cost:.4f} out)"
+        )
+    return f"Tokens: {input_tokens:,} in / {output_tokens:,} out / {total_tokens:,} total"
+
+
 def load_api_key() -> str:
     key = os.environ.get("OPENAI_API_KEY")
     if key:
@@ -79,6 +105,39 @@ def load_api_key() -> str:
                 if line.startswith("OPENAI_API_KEY=") and not line.startswith("#"):
                     return line.split("=", 1)[1].strip().strip("'\"")
     return ""
+
+
+def find_project_context() -> str:
+    """Auto-detect CLAUDE.md project context from the current project."""
+    context_parts = []
+    # Search for CLAUDE.md files (project root and subdirectories)
+    claude_md_paths = [
+        Path.cwd() / "CLAUDE.md",
+        Path.cwd() / ".claude" / "CLAUDE.md",
+    ]
+    for p in claude_md_paths:
+        if p.exists():
+            content = p.read_text(encoding="utf-8", errors="replace")[:5_000]
+            context_parts.append(f"### Project Context ({p.name})\n{content}")
+            break  # Use first found
+
+    return "\n\n".join(context_parts)
+
+
+def find_plan_files() -> list[str]:
+    """Auto-detect plan files in common locations."""
+    plan_dirs = [
+        Path.cwd() / "docs" / "superpowers" / "specs",
+        Path.cwd() / ".claude" / "plans",
+        Path.cwd() / "docs" / "plans",
+        Path.cwd() / "docs" / "specs",
+    ]
+    plan_files = []
+    for d in plan_dirs:
+        if d.is_dir():
+            for f in sorted(d.glob("*.md"), key=lambda x: x.stat().st_mtime, reverse=True):
+                plan_files.append(str(f))
+    return plan_files
 
 
 def read_file_or_dir(path_str: str, max_chars: int = 30_000) -> list[tuple[str, str]]:
@@ -144,13 +203,18 @@ def save_consult(question: str, answer: str, role: str, model: str) -> Path:
 def main():
     parser = argparse.ArgumentParser(description="GPT Consult")
     parser.add_argument("--question", "-q", required=True, help="Question to ask GPT")
-    parser.add_argument("--files", "-f", nargs="+", required=True, help="Files or directories to include")
+    parser.add_argument("--files", "-f", nargs="*", default=[], help="Files or directories to include")
+    parser.add_argument("--stdin", action="store_true", help="Read additional context from stdin")
     parser.add_argument("--role", "-r", default="expert",
                         choices=["expert", "architect", "reviewer", "designer", "implementer"],
                         help="GPT role (default: expert)")
     parser.add_argument("--model", default="gpt-5.4", help="OpenAI model (default: gpt-5.4)")
     parser.add_argument("--no-save", action="store_true", help="Don't save to file")
+    parser.add_argument("--no-stream", action="store_true", help="Disable streaming output")
     parser.add_argument("--git-context", action="store_true", help="Include git branch/log context")
+    parser.add_argument("--auto-context", action="store_true", help="Auto-include CLAUDE.md project context")
+    parser.add_argument("--auto-plan", action="store_true",
+                        help="Auto-detect and include the most recent plan file")
     args = parser.parse_args()
 
     from openai import OpenAI
@@ -167,18 +231,43 @@ def main():
             ext = Path(name).suffix.lstrip('.') or 'txt'
             file_sections.append(f"### {name}\n```{ext}\n{content}\n```")
 
-    if not file_sections:
-        print("No files found.", file=sys.stderr)
+    # Read from stdin if requested
+    if args.stdin and not sys.stdin.isatty():
+        stdin_content = sys.stdin.read()
+        if stdin_content.strip():
+            file_sections.append(f"### (stdin)\n```\n{stdin_content}\n```")
+
+    # Auto-detect plan files
+    if args.auto_plan:
+        plans = find_plan_files()
+        if plans:
+            latest = plans[0]
+            for name, content in read_file_or_dir(latest):
+                ext = Path(name).suffix.lstrip('.') or 'md'
+                file_sections.append(f"### {name} (auto-detected plan)\n```{ext}\n{content}\n```")
+            print(f"Auto-included plan: {latest}")
+
+    if not file_sections and not args.stdin:
+        print("No files found. Use -f to specify files, or --stdin to pipe content.", file=sys.stderr)
         sys.exit(1)
 
     # Build prompt
     parts = [args.question, ""]
+
+    # Auto-include project context
+    if args.auto_context:
+        project_ctx = find_project_context()
+        if project_ctx:
+            parts.append(f"## Project Context\n{project_ctx}\n")
+
     if args.git_context:
         ctx = get_git_context()
         if ctx:
             parts.append(f"## Git Context\n{ctx}\n")
-    parts.append(f"## Source Files ({len(file_sections)} files)\n")
-    parts.append("\n\n".join(file_sections))
+
+    if file_sections:
+        parts.append(f"## Source Files ({len(file_sections)} files)\n")
+        parts.append("\n\n".join(file_sections))
 
     prompt = "\n".join(parts)
 
@@ -186,21 +275,52 @@ def main():
     if len(prompt) > 120_000:
         prompt = prompt[:120_000] + "\n\n... [context truncated]"
 
-    print(f"Consulting GPT ({args.role}) with {len(file_sections)} files...\n")
+    source_desc = f"{len(file_sections)} files" if file_sections else "stdin"
+    print(f"Consulting GPT ({args.role}) with {source_desc}...\n")
 
     client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model=args.model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPTS[args.role]},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-        max_completion_tokens=4096,
-    )
 
-    answer = response.choices[0].message.content or ""
-    print(answer)
+    if args.no_stream:
+        # Non-streaming mode
+        response = client.chat.completions.create(
+            model=args.model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPTS[args.role]},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            max_completion_tokens=4096,
+        )
+        answer = response.choices[0].message.content or ""
+        print(answer)
+        if response.usage:
+            print(f"\n{format_cost(response.usage, args.model)}")
+    else:
+        # Streaming mode
+        stream = client.chat.completions.create(
+            model=args.model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPTS[args.role]},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            max_completion_tokens=4096,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        answer_parts = []
+        usage = None
+        for chunk in stream:
+            if chunk.usage:
+                usage = chunk.usage
+            if chunk.choices and chunk.choices[0].delta.content:
+                text = chunk.choices[0].delta.content
+                print(text, end="", flush=True)
+                answer_parts.append(text)
+        print()  # Final newline
+        answer = "".join(answer_parts)
+        if usage:
+            print(f"\n{format_cost(usage, args.model)}")
 
     if not args.no_save:
         filepath = save_consult(args.question, answer, args.role, args.model)
