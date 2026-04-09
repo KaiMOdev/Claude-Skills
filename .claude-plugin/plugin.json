@@ -1,0 +1,22 @@
+{
+  "name": "chatgpt-review",
+  "version": "1.0.0",
+  "description": "Get a second opinion from ChatGPT 5.4 on code reviews, architecture, design plans, and implementation strategies",
+  "author": {
+    "name": "Christophe Lams",
+    "url": "https://github.com/KaiMOdev"
+  },
+  "homepage": "https://github.com/KaiMOdev/Claude-Skills",
+  "repository": "https://github.com/KaiMOdev/Claude-Skills",
+  "license": "MIT",
+  "keywords": [
+    "chatgpt",
+    "openai",
+    "code-review",
+    "second-opinion",
+    "architecture",
+    "design-review",
+    "implementation-review",
+    "gpt"
+  ]
+}
