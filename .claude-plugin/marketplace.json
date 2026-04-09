@@ -1,0 +1,25 @@
+{
+  "name": "claude-skills",
+  "owner": {
+    "name": "Christophe Lams",
+    "url": "https://github.com/KaiMOdev"
+  },
+  "metadata": {
+    "description": "A collection of plugins for Claude Code — external AI integrations and specialized workflows",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "chatgpt-review",
+      "source": ".",
+      "description": "Get a second opinion from ChatGPT 5.4 on code reviews, architecture, design plans, and implementation strategies",
+      "version": "1.0.0",
+      "author": {
+        "name": "Christophe Lams"
+      },
+      "repository": "https://github.com/KaiMOdev/Claude-Skills",
+      "license": "MIT",
+      "keywords": ["chatgpt", "openai", "code-review", "second-opinion", "architecture", "design-review"]
+    }
+  ]
+}
