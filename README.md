@@ -1,10 +1,14 @@
-# ChatGPT Review — Claude Code Plugin
+# Claude Skills — Superpowers Plugin Collection
 
-Get a second opinion from ChatGPT 5.4 on your code, design plans, implementation strategies, and architecture decisions. Two models catch more than one.
+A collection of Claude Code plugins that improve and complete the [Superpowers](https://github.com/anthropics/superpowers) skill suite for Claude Code. Each plugin extends Claude's capabilities by integrating external AI models and tools into the Superpowers workflow.
 
-## What it does
+## Plugins
 
-This plugin adds a `chatgpt-review` skill to Claude Code that calls the OpenAI ChatGPT API to provide independent reviews and consultations. Use it alongside Claude for maximum coverage — different models have different blind spots.
+### ChatGPT Review
+
+Get a second opinion from ChatGPT 5.4 on your code, design plans, implementation strategies, and architecture decisions. Two models catch more than one — this plugin slots into the Superpowers review and planning workflow, giving you an independent external perspective at every checkpoint.
+
+This plugin adds a `chatgpt-review` skill to Claude Code that calls the OpenAI ChatGPT API to provide independent reviews and consultations. Use it alongside Claude's built-in Superpowers skills (brainstorming, writing-plans, executing-plans, code-review) for maximum coverage — different models have different blind spots.
 
 ### Review Modes
 
