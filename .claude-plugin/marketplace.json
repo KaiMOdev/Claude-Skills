@@ -11,7 +11,10 @@
   "plugins": [
     {
       "name": "chatgpt-review",
-      "source": ".",
+      "source": {
+        "source": "github",
+        "repo": "KaiMOdev/Claude-Skills"
+      },
       "description": "Get a second opinion from ChatGPT 5.4 on code reviews, architecture, design plans, and implementation strategies",
       "version": "1.0.0",
       "author": {
